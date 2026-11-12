@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pokémon Portfolio Tracker</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎴</text></svg>">
+</head>
+<body>
+
+<!-- Header -->
+<header class="header">
+    <div class="container header-inner">
+        <div class="logo">
+            <div class="logo-icon">🎴</div>
+            <div class="logo-text">PokéTracker <span>Portfolio</span></div>
+        </div>
+        <div class="header-actions">
+            <button class="btn btn-secondary btn-icon" id="btn-refresh-prices" title="Preise aktualisieren">🔄</button>
+            <button class="btn btn-primary" id="btn-add-card">＋ Karte</button>
+        </div>
+    </div>
+</header>
+
+<!-- Dashboard -->
+<section class="dashboard">
+    <div class="container">
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Karten</div>
+                <div class="stat-value" id="stat-count">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Marktwert</div>
+                <div class="stat-value" id="stat-market">—</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Kosten</div>
+                <div class="stat-value" id="stat-cost">—</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Gewinn / Verlust</div>
+                <div class="stat-value" id="stat-profit">—</div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Toolbar -->
+<section class="container">
+    <div class="toolbar">
+        <div class="search-box">
+            <input type="text" id="search-input" placeholder="Karten durchsuchen…">
+        </div>
+        <div class="sort-select">
+            <select id="sort-select">
+                <option value="date-desc">Neueste zuerst</option>
+                <option value="date-asc">Älteste zuerst</option>
+                <option value="name-asc">Name A–Z</option>
+                <option value="name-desc">Name Z–A</option>
+                <option value="value-desc">Wert ↓</option>
+                <option value="value-asc">Wert ↑</option>
+                <option value="profit-desc">Gewinn ↓</option>
+                <option value="profit-asc">Gewinn ↑</option>
+            </select>
+        </div>
+    </div>
+</section>
+
+<!-- Card Grid -->
+<section class="container">
+    <div class="card-grid" id="card-grid">
+        <div class="empty-state" id="empty-state">
+            <div class="empty-state-icon">🎴</div>
+            <h3>Noch keine Karten</h3>
+            <p>Füge deine erste Pokémon-Karte hinzu, um zu starten.</p>
+            <button class="btn btn-primary" onclick="document.getElementById('btn-add-card').click()">＋ Karte hinzufügen</button>
+        </div>
+    </div>
+</section>
+
+<!-- Add Card Modal -->
+<div class="modal" id="modal-add">
+    <div class="modal-overlay"></div>
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>Karte hinzufügen</h2>
+            <button class="modal-close" id="modal-add-close">✕</button>
+        </div>
+        <div class="modal-body">
+
+            <!-- Step 1: Upload -->
+            <div id="step-upload">
+                <div class="upload-area" id="upload-area">
+                    <div id="upload-placeholder">
+                        <div class="upload-area-icon">📷</div>
+                        <p>Foto der Karte aufnehmen oder hochladen<small>Die Karte wird per OCR erkannt</small></p>
+                    </div>
+                    <img id="upload-preview" alt="Vorschau">
+                    <input type="file" id="file-input" accept="image/*" capture="environment" hidden>
+                </div>
+
+                <div class="ocr-status" id="ocr-status">
+                    <div class="spinner"></div>
+                    <span id="ocr-status-text">Text wird erkannt…</span>
+                </div>
+
+                <div class="manual-search">
+                    <input type="text" id="manual-search-input" placeholder="Oder Name eingeben…">
+                    <button class="btn btn-primary" id="btn-manual-search">Suchen</button>
+                </div>
+            </div>
+
+            <!-- Step 2: Select -->
+            <div id="step-select" style="display:none">
+                <div class="search-results" id="search-results"></div>
+                <div class="search-loading" id="search-loading">
+                    <div class="spinner"></div>
+                    <span>Suche läuft…</span>
+                </div>
+                <div class="search-empty" id="search-empty">
+                    Keine Karten gefunden. Bitte anderen Suchbegriff probieren.
+                </div>
+                <div class="manual-search">
+                    <input type="text" id="manual-search-input-step2" placeholder="Erneut suchen…">
+                    <button class="btn btn-primary" id="btn-manual-search-step2">Suchen</button>
+                </div>
+                <div class="step-nav">
+                    <button class="btn btn-secondary" id="btn-back-upload">← Zurück</button>
+                </div>
+            </div>
+
+            <!-- Step 3: Confirm -->
+            <div id="step-confirm" style="display:none">
+                <div class="confirm-card">
+                    <img id="confirm-image" src="" alt="Karte">
+                    <div class="confirm-details">
+                        <div class="confirm-row">
+                            <span class="label">Name</span>
+                            <span class="value" id="confirm-name">—</span>
+                        </div>
+                        <div class="confirm-row">
+                            <span class="label">Set</span>
+                            <span class="value" id="confirm-set">—</span>
+                        </div>
+                        <div class="confirm-row">
+                            <span class="label">Seltenheit</span>
+                            <span class="value" id="confirm-rarity">—</span>
+                        </div>
+                        <div class="confirm-row">
+                            <span class="label">Nummer</span>
+                            <span class="value" id="confirm-number">—</span>
+                        </div>
+                        <div class="confirm-row">
+                            <span class="label">Marktwert</span>
+                            <span class="value" id="confirm-market-price">—</span>
+                        </div>
+                    </div>
+                    <div class="buy-price-input">
+                        <label for="buy-price">Kaufpreis (€)</label>
+                        <input type="number" id="buy-price" placeholder="0.00" step="0.01" min="0">
+                    </div>
+                </div>
+                <div class="step-nav">
+                    <button class="btn btn-secondary" id="btn-back-select">← Zurück</button>
+                    <button class="btn btn-primary" id="btn-confirm-add">Hinzufügen</button>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<!-- Edit Modal -->
+<div class="modal" id="modal-edit">
+    <div class="modal-overlay"></div>
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>Karte bearbeiten</h2>
+            <button class="modal-close" id="modal-edit-close">✕</button>
+        </div>
+        <div class="modal-body">
+            <div class="edit-card-preview">
+                <img id="edit-image" src="" alt="Karte">
+                <div class="edit-card-info">
+                    <h3 id="edit-name">—</h3>
+                    <p id="edit-set">—</p>
+                </div>
+            </div>
+            <div class="edit-form-group">
+                <label for="edit-buy-price">Kaufpreis (€)</label>
+                <input type="number" id="edit-buy-price" step="0.01" min="0">
+            </div>
+            <div class="edit-actions">
+                <button class="btn btn-danger" id="btn-edit-delete">Löschen</button>
+                <button class="btn btn-primary" id="btn-edit-save">Speichern</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Refresh Overlay -->
+<div class="refresh-overlay" id="refresh-overlay">
+    <div class="refresh-box">
+        <h3>Preise aktualisieren…</h3>
+        <div class="progress-bar">
+            <div class="progress-fill" id="refresh-progress"></div>
+        </div>
+        <div class="refresh-status" id="refresh-status">0 / 0</div>
+    </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<!-- Scripts -->
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="app.js"></script>
+
+</body>
+</html>

@@ -1,0 +1,506 @@
+
+// ===== OCR — Improved =====
+async function performOCR(imageSource) {
+    dom.ocrStatus.style.display = 'flex';
+    dom.ocrStatusText.textContent = 'Text wird erkannt…';
+
+    try {
+        const result = await Tesseract.recognize(imageSource, 'eng', {
+            logger: info => {
+                if (info.status === 'recognizing text') {
+                    const pct = Math.round((info.progress || 0) * 100);
+                    dom.ocrStatusText.textContent = `Text wird erkannt… ${pct}%`;
+                }
+            }
+        });
+
+        dom.ocrStatus.style.display = 'none';
+        const text = result.data.text || '';
+        console.log('OCR raw text:', text);
+        return extractCardInfo(text);
+    } catch (err) {
+        console.error('OCR error:', err);
+        dom.ocrStatus.style.display = 'none';
+        return null;
+    }
+}
+
+function extractCardInfo(ocrText) {
+    const lines = ocrText.split('\n').map(l => l.trim()).filter(Boolean);
+
+    // Try to extract set number patterns
+    let setNumber = null;
+    const allText = ocrText.replace(/\n/g, ' ');
+
+    // Pattern: "SV1-025", "xy12-45", "swsh1-123"
+    const setIdMatch = allText.match(/([A-Za-z]{2,6}\d{0,2})[-–](\d{1,4})/);
+    if (setIdMatch) {
+        setNumber = `${setIdMatch[1]}-${setIdMatch[2]}`;
+    }
+
+    // Pattern: "123/456"
+    if (!setNumber) {
+        const slashMatch = allText.match(/(\d{1,4})\s*[\/]\s*(\d{1,4})/);
+        if (slashMatch) {
+            setNumber = `${slashMatch[1]}/${slashMatch[2]}`;
+        }
+    }
+
+    // Extract card name — improved logic
+    // Common Pokémon names to check against OCR text
+    const knownPokemon = [
+        'Charizard', 'Pikachu', 'Mewtwo', 'Mew', 'Blastoise', 'Venusaur',
+        'Gengar', 'Dragonite', 'Eevee', 'Snorlax', 'Gyarados', 'Alakazam',
+        'Machamp', 'Arcanine', 'Lapras', 'Lugia', 'Ho-Oh', 'Rayquaza',
+        'Gardevoir', 'Lucario', 'Umbreon', 'Espeon', 'Sylveon', 'Jolteon',
+        'Flareon', 'Vaporeon', 'Leafeon', 'Glaceon', 'Arceus', 'Dialga',
+        'Palkia', 'Giratina', 'Darkrai', 'Celebi', 'Entei', 'Suicune',
+        'Raikou', 'Tyranitar', 'Salamence', 'Metagross', 'Absol', 'Blaziken',
+        'Swampert', 'Sceptile', 'Reshiram', 'Zekrom', 'Kyurem', 'Greninja',
+        'Mimikyu', 'Toxtricity', 'Zacian', 'Zamazenta', 'Miraidon', 'Koraidon',
+        'Charmander', 'Charmeleon', 'Squirtle', 'Wartortle', 'Bulbasaur', 'Ivysaur',
+        'Caterpie', 'Weedle', 'Pidgey', 'Rattata', 'Spearow', 'Ekans',
+        'Sandshrew', 'Nidoran', 'Clefairy', 'Vulpix', 'Ninetales', 'Jigglypuff',
+        'Zubat', 'Oddish', 'Paras', 'Venonat', 'Diglett', 'Meowth', 'Psyduck',
+        'Growlithe', 'Poliwag', 'Abra', 'Kadabra', 'Bellsprout', 'Tentacool',
+        'Geodude', 'Ponyta', 'Slowpoke', 'Magnemite', 'Doduo', 'Seel',
+        'Grimer', 'Shellder', 'Gastly', 'Haunter', 'Onix', 'Drowzee',
+        'Krabby', 'Voltorb', 'Exeggcute', 'Cubone', 'Hitmonlee', 'Hitmonchan',
+        'Lickitung', 'Koffing', 'Rhyhorn', 'Chansey', 'Tangela', 'Kangaskhan',
+        'Horsea', 'Goldeen', 'Staryu', 'Scyther', 'Jynx', 'Electabuzz',
+        'Magmar', 'Pinsir', 'Tauros', 'Magikarp', 'Ditto', 'Porygon',
+        'Omanyte', 'Kabuto', 'Aerodactyl', 'Articuno', 'Zapdos', 'Moltres',
+        'Dratini', 'Dragonair',
+    ];
+
+    // Check if any known Pokémon name appears in the OCR text (case-insensitive)
+    const textLower = allText.toLowerCase();
+    let cardName = null;
+
+    for (const name of knownPokemon) {
+        if (textLower.includes(name.toLowerCase())) {
+            cardName = name;
+            break;
+        }
+    }
+
+    // Fallback: try extracting from lines
+    if (!cardName) {
+        // Noise words to skip
+        const noise = /^(basic|stage\s*[12]?|trainer|energy|item|supporter|stadium|hp\s*\d|ex\b|gx\b|vstar|vmax|v\b|rule\s*box|ability|attack|weakness|resistance|retreat|illustrator|\d+)/i;
+
+        for (const line of lines) {
+            // Remove numbers and special characters, keep letters and spaces
+            let cleaned = line
+                .replace(/[^a-zA-ZäöüÄÖÜéèêàáâ\s''-]/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+
+            if (cleaned.length < 3) continue;
+            if (noise.test(cleaned)) continue;
+
+            // Take the first word(s) that look like a name
+            const words = cleaned.split(' ').filter(w => w.length >= 3);
+            if (words.length > 0) {
+                cardName = words.slice(0, 2).join(' ');
+                break;
+            }
+        }
+    }
+
+    return { cardName, setNumber, rawText: ocrText };
+}
+
+// ===== Modal Management =====
+function openAddModal() {
+    selectedCard = null;
+    showStep('upload');
+    resetUpload();
+    dom.modalAdd.style.display = 'flex';
+    requestAnimationFrame(() => dom.modalAdd.classList.add('visible'));
+    document.body.style.overflow = 'hidden';
+}
+
+function closeAddModal() {
+    dom.modalAdd.classList.remove('visible');
+    setTimeout(() => {
+        dom.modalAdd.style.display = 'none';
+        document.body.style.overflow = '';
+    }, 200);
+}
+
+function showStep(step) {
+    dom.stepUpload.style.display = step === 'upload' ? '' : 'none';
+    dom.stepSelect.style.display = step === 'select' ? '' : 'none';
+    dom.stepConfirm.style.display = step === 'confirm' ? '' : 'none';
+}
+
+function resetUpload() {
+    dom.fileInput.value = '';
+    dom.uploadPreview.style.display = 'none';
+    dom.uploadPlaceholder.style.display = '';
+    dom.ocrStatus.style.display = 'none';
+    dom.manualSearchInput.value = '';
+    dom.searchResults.innerHTML = '';
+    dom.searchEmpty.style.display = 'none';
+    dom.searchLoading.style.display = 'none';
+    dom.buyPrice.value = '';
+}
+
+// ===== Search and display results =====
+async function doSearch(query) {
+    showStep('select');
+    dom.searchResults.innerHTML = '';
+    dom.searchEmpty.style.display = 'none';
+    dom.searchLoading.style.display = 'flex';
+
+    const results = await searchTCGApi(query);
+
+    dom.searchLoading.style.display = 'none';
+
+    if (results.length === 0) {
+        dom.searchEmpty.style.display = '';
+        return;
+    }
+
+    results.forEach((card, i) => {
+        const price = getMarketPrice(card);
+        const el = document.createElement('div');
+        el.className = 'search-result-item';
+        el.style.animationDelay = `${i * 0.04}s`;
+        el.innerHTML = `
+            <img src="${card.images?.small || ''}" alt="${card.name}" loading="lazy">
+            <div class="search-result-info">
+                <strong>${card.name}</strong>
+                <span>${card.set?.name || ''} · #${card.number || ''} · ${card.rarity || ''}</span>
+            </div>
+            <span class="search-result-price">${price > 0 ? formatEuro(price) : '—'}</span>
+        `;
+        el.addEventListener('click', () => selectSearchResult(card));
+        dom.searchResults.appendChild(el);
+    });
+}
+
+function selectSearchResult(apiCard) {
+    selectedCard = apiCard;
+    const price = getMarketPrice(apiCard);
+
+    dom.confirmImage.src = apiCard.images?.large || apiCard.images?.small || '';
+    dom.confirmName.textContent = apiCard.name;
+    dom.confirmSet.textContent = apiCard.set?.name || '—';
+    dom.confirmRarity.textContent = apiCard.rarity || '—';
+    dom.confirmNumber.textContent = apiCard.number || '—';
+    dom.confirmMarketPrice.textContent = price > 0 ? formatEuro(price) : '—';
+    dom.buyPrice.value = '';
+
+    showStep('confirm');
+}
+
+// ===== Add Card to Portfolio =====
+function addCardToPortfolio() {
+    if (!selectedCard) return;
+
+    const buyPrice = parseFloat(dom.buyPrice.value) || 0;
+    const marketPrice = getMarketPrice(selectedCard);
+
+    const entry = {
+        id: crypto.randomUUID(),
+        tcgId: selectedCard.id,
+        name: selectedCard.name,
+        set: selectedCard.set?.name || '',
+        setId: selectedCard.set?.id || '',
+        number: selectedCard.number || '',
+        rarity: selectedCard.rarity || '',
+        imageUrl: selectedCard.images?.large || selectedCard.images?.small || '',
+        marketPrice,
+        buyPrice,
+        addedAt: Date.now(),
+    };
+
+    portfolio.push(entry);
+    savePortfolio();
+    updateDashboard();
+    renderCards();
+    closeAddModal();
+    showToast(`✓ ${entry.name} hinzugefügt`);
+}
+
+// ===== Edit Modal =====
+function openEditModal(cardId) {
+    const card = portfolio.find(c => c.id === cardId);
+    if (!card) return;
+
+    editingCardId = cardId;
+    dom.editImage.src = card.imageUrl;
+    dom.editName.textContent = card.name;
+    dom.editSet.textContent = `${card.set} · #${card.number}`;
+    dom.editBuyPrice.value = card.buyPrice || '';
+    dom.modalEdit.style.display = 'flex';
+    requestAnimationFrame(() => dom.modalEdit.classList.add('visible'));
+    document.body.style.overflow = 'hidden';
+}
+
+function closeEditModal() {
+    dom.modalEdit.classList.remove('visible');
+    setTimeout(() => {
+        dom.modalEdit.style.display = 'none';
+        document.body.style.overflow = '';
+    }, 200);
+    editingCardId = null;
+}
+
+function saveEditCard() {
+    const card = portfolio.find(c => c.id === editingCardId);
+    if (!card) return;
+
+    card.buyPrice = parseFloat(dom.editBuyPrice.value) || 0;
+    savePortfolio();
+    updateDashboard();
+    renderCards();
+    closeEditModal();
+    showToast('✓ Karte aktualisiert');
+}
+
+function deleteCard() {
+    if (!confirm('Karte wirklich löschen?')) return;
+
+    portfolio = portfolio.filter(c => c.id !== editingCardId);
+    savePortfolio();
+    updateDashboard();
+    renderCards();
+    closeEditModal();
+    showToast('Karte gelöscht');
+}
+
+// ===== Refresh Prices =====
+async function refreshAllPrices() {
+    if (portfolio.length === 0) {
+        showToast('Keine Karten zum Aktualisieren.');
+        return;
+    }
+
+    dom.refreshOverlay.style.display = 'flex';
+    dom.refreshProgress.style.width = '0%';
+    dom.refreshStatus.textContent = `0 / ${portfolio.length}`;
+
+    let updated = 0;
+
+    for (let i = 0; i < portfolio.length; i++) {
+        const card = portfolio[i];
+        try {
+            const res = await fetch(`${API_BASE}/${card.tcgId}`);
+            if (res.ok) {
+                const data = await res.json();
+                const newPrice = getMarketPrice(data.data);
+                if (newPrice > 0) {
+                    card.marketPrice = newPrice;
+                    updated++;
+                }
+            }
+        } catch (err) {
+            console.warn(`Preis-Update fehlgeschlagen für ${card.name}:`, err);
+        }
+
+        const progress = ((i + 1) / portfolio.length) * 100;
+        dom.refreshProgress.style.width = `${progress}%`;
+        dom.refreshStatus.textContent = `${i + 1} / ${portfolio.length}`;
+
+        if (i < portfolio.length - 1) {
+            await new Promise(r => setTimeout(r, 200));
+        }
+    }
+
+    savePortfolio();
+    updateDashboard();
+    renderCards();
+
+    dom.refreshOverlay.style.display = 'none';
+    showToast(`✓ ${updated} Preis${updated !== 1 ? 'e' : ''} aktualisiert`);
+}
+
+// ===== Toast =====
+let toastTimeout;
+function showToast(message) {
+    clearTimeout(toastTimeout);
+    dom.toast.textContent = message;
+    dom.toast.style.display = '';
+    dom.toast.classList.add('visible');
+    toastTimeout = setTimeout(() => {
+        dom.toast.classList.remove('visible');
+        setTimeout(() => { dom.toast.style.display = 'none'; }, 300);
+    }, 3000);
+}
+
+// ===== File Upload Handler — Improved =====
+async function handleFileUpload(file) {
+    if (!file.type.startsWith('image/')) {
+        showToast('Bitte ein Bild hochladen.');
+        return;
+    }
+
+    const url = URL.createObjectURL(file);
+    dom.uploadPreview.src = url;
+    dom.uploadPreview.style.display = '';
+    dom.uploadPlaceholder.style.display = 'none';
+
+    // Run OCR
+    const result = await performOCR(file);
+
+    if (result) {
+        console.log('OCR result:', result);
+
+        // Build search queries — try multiple strategies
+        let queries = [];
+
+        // Priority 1: Set number
+        if (result.setNumber) {
+            queries.push(result.setNumber);
+        }
+
+        // Priority 2: Detected card name
+        if (result.cardName) {
+            queries.push(result.cardName);
+        }
+
+        // Try each query until we find results
+        let found = false;
+        for (const query of queries) {
+            dom.manualSearchInput.value = query;
+            dom.ocrStatusText.textContent = `Suche nach "${query}"…`;
+            dom.ocrStatus.style.display = 'flex';
+
+            const results = await searchTCGApi(query);
+
+            if (results.length > 0) {
+                dom.ocrStatus.style.display = 'none';
+                showStep('select');
+                dom.searchResults.innerHTML = '';
+                dom.searchLoading.style.display = 'none';
+
+                results.forEach((card, i) => {
+                    const price = getMarketPrice(card);
+                    const el = document.createElement('div');
+                    el.className = 'search-result-item';
+                    el.style.animationDelay = `${i * 0.04}s`;
+                    el.innerHTML = `
+                        <img src="${card.images?.small || ''}" alt="${card.name}" loading="lazy">
+                        <div class="search-result-info">
+                            <strong>${card.name}</strong>
+                            <span>${card.set?.name || ''} · #${card.number || ''} · ${card.rarity || ''}</span>
+                        </div>
+                        <span class="search-result-price">${price > 0 ? formatEuro(price) : '—'}</span>
+                    `;
+                    el.addEventListener('click', () => selectSearchResult(card));
+                    dom.searchResults.appendChild(el);
+                });
+
+                found = true;
+                break;
+            }
+        }
+
+        dom.ocrStatus.style.display = 'none';
+
+        if (!found) {
+            // Show what OCR found and let user edit
+            const bestGuess = result.cardName || result.setNumber || '';
+            dom.manualSearchInput.value = bestGuess;
+            showToast('Keine Treffer — bitte den Suchbegriff korrigieren und erneut suchen.');
+        }
+    } else {
+        showToast('Text konnte nicht erkannt werden. Bitte manuell suchen.');
+    }
+}
+
+// ===== Event Listeners =====
+function initEvents() {
+    dom.btnAddCard.addEventListener('click', openAddModal);
+
+    dom.modalAddClose.addEventListener('click', closeAddModal);
+    dom.modalAdd.querySelector('.modal-overlay').addEventListener('click', closeAddModal);
+
+    dom.modalEditClose.addEventListener('click', closeEditModal);
+    dom.modalEdit.querySelector('.modal-overlay').addEventListener('click', closeEditModal);
+
+    dom.uploadArea.addEventListener('click', () => dom.fileInput.click());
+
+    dom.uploadArea.addEventListener('dragover', e => {
+        e.preventDefault();
+        dom.uploadArea.classList.add('dragover');
+    });
+    dom.uploadArea.addEventListener('dragleave', () => {
+        dom.uploadArea.classList.remove('dragover');
+    });
+    dom.uploadArea.addEventListener('drop', e => {
+        e.preventDefault();
+        dom.uploadArea.classList.remove('dragover');
+        if (e.dataTransfer.files.length > 0) {
+            handleFileUpload(e.dataTransfer.files[0]);
+        }
+    });
+
+    dom.fileInput.addEventListener('change', () => {
+        if (dom.fileInput.files.length > 0) {
+            handleFileUpload(dom.fileInput.files[0]);
+        }
+    });
+
+    dom.btnManualSearch.addEventListener('click', () => {
+        const q = dom.manualSearchInput.value.trim();
+        if (q) doSearch(q);
+    });
+
+    dom.manualSearchInput.addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+            const q = dom.manualSearchInput.value.trim();
+            if (q) doSearch(q);
+        }
+    });
+
+    // Step 2 manual search
+    const searchInput2 = $('#manual-search-input-step2');
+    const searchBtn2 = $('#btn-manual-search-step2');
+    if (searchBtn2) {
+        searchBtn2.addEventListener('click', () => {
+            const q = searchInput2.value.trim();
+            if (q) doSearch(q);
+        });
+    }
+    if (searchInput2) {
+        searchInput2.addEventListener('keydown', e => {
+            if (e.key === 'Enter') {
+                const q = searchInput2.value.trim();
+                if (q) doSearch(q);
+            }
+        });
+    }
+
+    dom.btnBackUpload.addEventListener('click', () => showStep('upload'));
+    dom.btnBackSelect.addEventListener('click', () => showStep('select'));
+
+    dom.btnConfirmAdd.addEventListener('click', addCardToPortfolio);
+
+    dom.btnEditSave.addEventListener('click', saveEditCard);
+    dom.btnEditDelete.addEventListener('click', deleteCard);
+
+    dom.btnRefreshPrices.addEventListener('click', refreshAllPrices);
+
+    dom.searchInput.addEventListener('input', renderCards);
+    dom.sortSelect.addEventListener('change', renderCards);
+
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') {
+            if (dom.modalAdd.style.display !== 'none') closeAddModal();
+            if (dom.modalEdit.style.display !== 'none') closeEditModal();
+        }
+    });
+}
+
+// ===== Init =====
+function init() {
+    initEvents();
+    updateDashboard();
+    renderCards();
+}
+
+init();

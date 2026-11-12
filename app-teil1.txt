@@ -1,0 +1,270 @@
+// ===== Pokémon Card Portfolio Tracker v2 =====
+
+const STORAGE_KEY = 'pokemon_portfolio';
+const API_BASE = 'https://api.pokemontcg.io/v2/cards';
+
+// ===== State =====
+let portfolio = loadPortfolio();
+let selectedCard = null;
+let editingCardId = null;
+
+// ===== DOM References =====
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => document.querySelectorAll(sel);
+
+const dom = {
+    statCount: $('#stat-count'),
+    statMarket: $('#stat-market'),
+    statCost: $('#stat-cost'),
+    statProfit: $('#stat-profit'),
+    cardGrid: $('#card-grid'),
+    emptyState: $('#empty-state'),
+    searchInput: $('#search-input'),
+    sortSelect: $('#sort-select'),
+    modalAdd: $('#modal-add'),
+    modalAddClose: $('#modal-add-close'),
+    btnAddCard: $('#btn-add-card'),
+    stepUpload: $('#step-upload'),
+    stepSelect: $('#step-select'),
+    stepConfirm: $('#step-confirm'),
+    uploadArea: $('#upload-area'),
+    fileInput: $('#file-input'),
+    uploadPlaceholder: $('#upload-placeholder'),
+    uploadPreview: $('#upload-preview'),
+    ocrStatus: $('#ocr-status'),
+    ocrStatusText: $('#ocr-status-text'),
+    manualSearchInput: $('#manual-search-input'),
+    btnManualSearch: $('#btn-manual-search'),
+    searchResults: $('#search-results'),
+    searchLoading: $('#search-loading'),
+    searchEmpty: $('#search-empty'),
+    btnBackUpload: $('#btn-back-upload'),
+    confirmImage: $('#confirm-image'),
+    confirmName: $('#confirm-name'),
+    confirmSet: $('#confirm-set'),
+    confirmRarity: $('#confirm-rarity'),
+    confirmNumber: $('#confirm-number'),
+    confirmMarketPrice: $('#confirm-market-price'),
+    buyPrice: $('#buy-price'),
+    btnConfirmAdd: $('#btn-confirm-add'),
+    btnBackSelect: $('#btn-back-select'),
+    modalEdit: $('#modal-edit'),
+    modalEditClose: $('#modal-edit-close'),
+    editImage: $('#edit-image'),
+    editName: $('#edit-name'),
+    editSet: $('#edit-set'),
+    editBuyPrice: $('#edit-buy-price'),
+    btnEditSave: $('#btn-edit-save'),
+    btnEditDelete: $('#btn-edit-delete'),
+    btnRefreshPrices: $('#btn-refresh-prices'),
+    refreshOverlay: $('#refresh-overlay'),
+    refreshProgress: $('#refresh-progress'),
+    refreshStatus: $('#refresh-status'),
+    toast: $('#toast'),
+};
+
+// ===== Storage =====
+function loadPortfolio() {
+    try {
+        return JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+    } catch {
+        return [];
+    }
+}
+
+function savePortfolio() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(portfolio));
+}
+
+// ===== Formatting =====
+function formatEuro(value) {
+    if (value == null || isNaN(value)) return '—';
+    return value.toLocaleString('de-DE', { style: 'currency', currency: 'EUR' });
+}
+
+function formatPercent(value) {
+    if (value == null || isNaN(value) || !isFinite(value)) return '';
+    const sign = value >= 0 ? '+' : '';
+    return `${sign}${value.toFixed(1)}%`;
+}
+
+// ===== Dashboard =====
+function updateDashboard() {
+    const count = portfolio.length;
+    let totalMarket = 0;
+    let totalCost = 0;
+
+    portfolio.forEach(card => {
+        totalMarket += card.marketPrice || 0;
+        totalCost += card.buyPrice || 0;
+    });
+
+    const totalProfit = totalMarket - totalCost;
+
+    animateValue(dom.statCount, count, false);
+    dom.statMarket.textContent = formatEuro(totalMarket);
+    dom.statCost.textContent = formatEuro(totalCost);
+    dom.statProfit.textContent = formatEuro(totalProfit);
+
+    dom.statProfit.className = 'stat-value';
+    if (totalProfit > 0.01) dom.statProfit.classList.add('profit');
+    else if (totalProfit < -0.01) dom.statProfit.classList.add('loss');
+}
+
+function animateValue(el, value, isCurrency) {
+    el.textContent = isCurrency ? formatEuro(value) : value;
+}
+
+// ===== Render Cards =====
+function renderCards() {
+    const filter = dom.searchInput.value.toLowerCase().trim();
+    const sort = dom.sortSelect.value;
+
+    let cards = [...portfolio];
+
+    if (filter) {
+        cards = cards.filter(c =>
+            c.name.toLowerCase().includes(filter) ||
+            (c.set || '').toLowerCase().includes(filter) ||
+            (c.number || '').toLowerCase().includes(filter)
+        );
+    }
+
+    cards.sort((a, b) => {
+        switch (sort) {
+            case 'date-desc': return (b.addedAt || 0) - (a.addedAt || 0);
+            case 'date-asc': return (a.addedAt || 0) - (b.addedAt || 0);
+            case 'name-asc': return a.name.localeCompare(b.name);
+            case 'name-desc': return b.name.localeCompare(a.name);
+            case 'profit-desc': return getProfit(b) - getProfit(a);
+            case 'profit-asc': return getProfit(a) - getProfit(b);
+            case 'value-desc': return (b.marketPrice || 0) - (a.marketPrice || 0);
+            case 'value-asc': return (a.marketPrice || 0) - (b.marketPrice || 0);
+            default: return 0;
+        }
+    });
+
+    dom.cardGrid.innerHTML = '';
+
+    if (cards.length === 0 && portfolio.length === 0) {
+        dom.emptyState.style.display = '';
+        return;
+    }
+
+    dom.emptyState.style.display = 'none';
+
+    if (cards.length === 0) {
+        dom.cardGrid.innerHTML = '<p style="grid-column:1/-1;text-align:center;color:var(--text-secondary);padding:3rem;">Keine Karten für diese Suche gefunden.</p>';
+        return;
+    }
+
+    cards.forEach((card, i) => {
+        const profit = getProfit(card);
+        const profitClass = profit > 0.01 ? 'positive' : profit < -0.01 ? 'negative' : 'neutral';
+        const percentChange = card.buyPrice > 0 ? ((profit / card.buyPrice) * 100) : 0;
+
+        const el = document.createElement('div');
+        el.className = 'portfolio-card';
+        el.style.animationDelay = `${i * 0.05}s`;
+        el.dataset.id = card.id;
+        el.innerHTML = `
+            <div class="portfolio-card-image">
+                <img src="${card.imageUrl}" alt="${card.name}" loading="lazy"
+                     onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22280%22><rect fill=%22%23161b2e%22 width=%22200%22 height=%22280%22 rx=%228%22/><text x=%2250%25%22 y=%2250%25%22 fill=%22%234a5568%22 text-anchor=%22middle%22 dy=%22.3em%22 font-size=%2213%22>Kein Bild</text></svg>'">
+                ${card.rarity ? `<span class="portfolio-card-rarity">${card.rarity}</span>` : ''}
+            </div>
+            <div class="portfolio-card-body">
+                <div class="portfolio-card-name">${card.name}</div>
+                <div class="portfolio-card-set">${card.set || ''}${card.number ? ' · #' + card.number : ''}</div>
+                <div class="portfolio-card-prices">
+                    <div class="price-block">
+                        <span class="price-label">Kaufpreis</span>
+                        <span class="price-value">${formatEuro(card.buyPrice)}</span>
+                    </div>
+                    <div class="price-block">
+                        <span class="price-label">Marktwert</span>
+                        <span class="price-value market">${formatEuro(card.marketPrice)}</span>
+                    </div>
+                </div>
+                <div class="portfolio-card-profit">
+                    <span class="profit-badge ${profitClass}">${profit >= 0 ? '+' : ''}${formatEuro(profit)}</span>
+                    <span class="profit-percent">${formatPercent(percentChange)}</span>
+                </div>
+            </div>
+        `;
+
+        el.addEventListener('click', () => openEditModal(card.id));
+        dom.cardGrid.appendChild(el);
+    });
+}
+
+function getProfit(card) {
+    return (card.marketPrice || 0) - (card.buyPrice || 0);
+}
+
+// ===== TCG API — Improved Multi-Strategy Search =====
+async function searchTCGApi(query) {
+    query = query.trim();
+    if (!query) return [];
+
+    // Strategy 1: Try as set number (e.g., "sv1-25" or "base1-4")
+    const setNumberMatch = query.match(/^([a-z0-9]+)-(\d+)$/i);
+    if (setNumberMatch) {
+        const results = await fetchTCG(`q=number:"${setNumberMatch[2]}" set.id:"${setNumberMatch[1]}"&pageSize=10`);
+        if (results.length > 0) return results;
+    }
+
+    // Strategy 2: Exact name match
+    const safeName = query.replace(/["""*()]/g, '').replace(/\s+/g, ' ').trim();
+    if (safeName.length < 2) return [];
+
+    let results = await fetchTCG(`q=name:"${safeName}"&pageSize=15&orderBy=-set.releaseDate`);
+    if (results.length > 0) return results;
+
+    // Strategy 3: Wildcard search (e.g., "Chariz" matches "Charizard")
+    results = await fetchTCG(`q=name:"${safeName}*"&pageSize=15&orderBy=-set.releaseDate`);
+    if (results.length > 0) return results;
+
+    // Strategy 4: Try each word individually (for multi-word OCR results)
+    const words = safeName.split(' ').filter(w => w.length >= 3);
+    for (const word of words) {
+        results = await fetchTCG(`q=name:"${word}*"&pageSize=15&orderBy=-set.releaseDate`);
+        if (results.length > 0) return results;
+    }
+
+    // Strategy 5: Try first word only with wildcard
+    if (safeName.length >= 3) {
+        const prefix = safeName.substring(0, Math.min(safeName.length, 6));
+        results = await fetchTCG(`q=name:"${prefix}*"&pageSize=15&orderBy=-set.releaseDate`);
+        if (results.length > 0) return results;
+    }
+
+    return [];
+}
+
+async function fetchTCG(queryString) {
+    try {
+        const res = await fetch(`${API_BASE}?${queryString}`);
+        if (!res.ok) return [];
+        const data = await res.json();
+        return data.data || [];
+    } catch {
+        return [];
+    }
+}
+
+function getMarketPrice(apiCard) {
+    const cm = apiCard.cardmarket?.prices;
+    if (cm) {
+        if (cm.averageSellPrice) return cm.averageSellPrice;
+        if (cm.trendPrice) return cm.trendPrice;
+    }
+    const tcg = apiCard.tcgplayer?.prices;
+    if (tcg) {
+        for (const variant of ['holofoil', 'normal', 'reverseHolofoil', '1stEditionHolofoil', '1stEditionNormal']) {
+            if (tcg[variant]?.market) return tcg[variant].market;
+            if (tcg[variant]?.mid) return tcg[variant].mid;
+        }
+    }
+    return 0;
+}
